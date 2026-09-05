@@ -32,11 +32,33 @@ android {
         }
     }
 
+    // Release signing comes from Gradle properties, never from the repo. Pass
+    // -PRELEASE_STORE_FILE=... -PRELEASE_STORE_PASSWORD=... -PRELEASE_KEY_ALIAS=... \
+    // -PRELEASE_KEY_PASSWORD=... on the command line (or a local, gitignored
+    // gradle.properties) to sign a release build. Without them, release stays unsigned,
+    // same as stock AGP behaviour.
+    val releaseStoreFile = providers.gradleProperty("RELEASE_STORE_FILE").orNull
+    val hasReleaseSigning = releaseStoreFile != null
+
+    if (hasReleaseSigning) {
+        signingConfigs {
+            create("release") {
+                storeFile = file(releaseStoreFile!!)
+                storePassword = providers.gradleProperty("RELEASE_STORE_PASSWORD").get()
+                keyAlias = providers.gradleProperty("RELEASE_KEY_ALIAS").get()
+                keyPassword = providers.gradleProperty("RELEASE_KEY_PASSWORD").get()
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            if (hasReleaseSigning) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
