@@ -49,6 +49,20 @@
             android:windowSoftInputMode="adjustResize" />
 
         <!--
+          Lets other apps open a file the user downloaded on API 26-28, where the file lives in
+          this app's own external directory rather than in MediaStore.
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
+        <!--
           kmp-tor declares TorService in its own manifest without a process. Merge :tor onto it so
           the daemon runs beside the runtime that consumes its SOCKS port; otherwise the port
           would be bound in the main process and would have to be shipped across an IPC boundary.

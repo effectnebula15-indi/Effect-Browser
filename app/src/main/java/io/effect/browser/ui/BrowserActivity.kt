@@ -28,11 +28,14 @@ abstract class BrowserActivity : ComponentActivity() {
 
     private val viewModel: BrowserViewModel by viewModels {
         BrowserViewModel.factory(
+            appContext = applicationContext,
             networkMode = ServiceLocator.networkMode,
             containerRepository = ServiceLocator.containerRepository,
             tabRepository = ServiceLocator.tabRepository,
             bookmarkRepository = ServiceLocator.bookmarkRepository,
             sessionPool = ServiceLocator.sessionPool,
+            filePicker = ServiceLocator.filePicker,
+            fileDownloader = ServiceLocator.fileDownloader,
             runtimeHolder = ServiceLocator.runtimeHolder,
             torStatus = ServiceLocator.torStatus,
         )
@@ -56,7 +59,11 @@ abstract class BrowserActivity : ComponentActivity() {
 
         setContent {
             EffectBrowserTheme {
-                BrowserScreen(viewModel)
+                BrowserScreen(
+                    viewModel = viewModel,
+                    filePicker = ServiceLocator.filePicker,
+                    downloadEvents = ServiceLocator.fileDownloader.events,
+                )
             }
         }
     }

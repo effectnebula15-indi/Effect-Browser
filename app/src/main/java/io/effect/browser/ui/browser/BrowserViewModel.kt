@@ -1,5 +1,6 @@
 package io.effect.browser.ui.browser
 
+import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -10,6 +11,9 @@ import io.effect.browser.domain.repository.ContainerRepository
 import io.effect.browser.domain.repository.TabRepository
 import io.effect.browser.domain.url.AddressResolver
 import io.effect.browser.domain.url.SearchEngine
+import io.effect.browser.files.FileDownloader
+import io.effect.browser.files.FilePickerCoordinator
+import io.effect.browser.files.FilePickerRequest
 import io.effect.browser.gecko.GeckoRuntimeHolder
 import io.effect.browser.gecko.GeckoSessionPool
 import io.effect.browser.tor.TorStatus
@@ -22,14 +26,19 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import org.mozilla.geckoview.GeckoResult
 import org.mozilla.geckoview.GeckoSession
+import org.mozilla.geckoview.WebResponse
 
 class BrowserViewModel(
+    private val appContext: Context,
     private val networkMode: NetworkMode,
     private val containerRepository: ContainerRepository,
     private val tabRepository: TabRepository,
     private val bookmarkRepository: BookmarkRepository,
     private val sessionPool: GeckoSessionPool,
+    private val filePicker: FilePickerCoordinator,
+    private val fileDownloader: FileDownloader,
     runtimeHolder: GeckoRuntimeHolder,
     torStatus: StateFlow<TorStatus>,
 ) : ViewModel() {
@@ -150,7 +159,7 @@ class BrowserViewModel(
         val containerTabs = current.tabs.filter { it.containerId == container.id }
 
         if (containerTabs.isEmpty()) {
-            viewModelScope.launch { tabRepository.open(container.id, HOME_URL) }
+            viewModelScope.launch { tabRepository.open(container.id, homeUrl()) }
             return
         }
         if (current.activeTabId == null || containerTabs.none { it.id == current.activeTabId }) {
@@ -169,8 +178,8 @@ class BrowserViewModel(
     fun openNewTab() {
         val container = _state.value.activeContainer ?: return
         viewModelScope.launch {
-            val tab = tabRepository.open(container.id, HOME_URL)
-            _state.update { it.copy(activeTabId = tab.id, addressText = "", currentUrl = HOME_URL) }
+            val tab = tabRepository.open(container.id, homeUrl())
+            _state.update { it.copy(activeTabId = tab.id, addressText = "", currentUrl = tab.url) }
         }
     }
 
@@ -190,7 +199,7 @@ class BrowserViewModel(
         val session = sessionPool.acquire(tabId, container)
         if (wiredSessions.add(tabId)) {
             attachDelegates(tabId, session)
-            val url = _state.value.tabs.firstOrNull { it.id == tabId }?.url ?: HOME_URL
+            val url = _state.value.tabs.firstOrNull { it.id == tabId }?.url ?: homeUrl()
             loadIfPermitted(session, url)
         }
         return session
@@ -334,6 +343,42 @@ class BrowserViewModel(
                 _state.update { it.copy(pageTitle = title.orEmpty()) }
                 persist(tabId)
             }
+
+            /**
+             * Gecko decided this response is a file rather than a page — a download link, a PDF,
+             * a generated blob. It has already fetched it (through the tor proxy, in the tor
+             * process) and hands us the open stream to drain.
+             */
+            override fun onExternalResponse(session: GeckoSession, response: WebResponse) {
+                fileDownloader.enqueue(response)
+            }
+        }
+
+        session.promptDelegate = object : GeckoSession.PromptDelegate {
+            override fun onFilePrompt(
+                session: GeckoSession,
+                prompt: GeckoSession.PromptDelegate.FilePrompt,
+            ): GeckoResult<GeckoSession.PromptDelegate.PromptResponse> {
+                val result = GeckoResult<GeckoSession.PromptDelegate.PromptResponse>()
+                viewModelScope.launch {
+                    val chosen = filePicker.pick(
+                        FilePickerRequest(
+                            mimeTypes = prompt.mimeTypes?.toList().orEmpty(),
+                            // FOLDER has no equivalent in the document picker; letting the user
+                            // pick several files is closer to the intent than refusing outright.
+                            allowMultiple = prompt.type != GeckoSession.PromptDelegate.FilePrompt.Type.SINGLE,
+                        ),
+                    )
+                    result.complete(
+                        if (chosen.isEmpty()) {
+                            prompt.dismiss()
+                        } else {
+                            prompt.confirm(appContext, chosen.toTypedArray())
+                        },
+                    )
+                }
+                return result
+            }
         }
     }
 
@@ -352,25 +397,33 @@ class BrowserViewModel(
         super.onCleared()
     }
 
+    /** Landing page for a new tab in this process. Google for direct, DuckDuckGo over tor. */
+    private fun homeUrl(): String = SearchEngine.homeUrlFor(networkMode)
+
     companion object {
-        const val HOME_URL = "about:blank"
 
         fun factory(
+            appContext: Context,
             networkMode: NetworkMode,
             containerRepository: ContainerRepository,
             tabRepository: TabRepository,
             bookmarkRepository: BookmarkRepository,
             sessionPool: GeckoSessionPool,
+            filePicker: FilePickerCoordinator,
+            fileDownloader: FileDownloader,
             runtimeHolder: GeckoRuntimeHolder,
             torStatus: StateFlow<TorStatus>,
         ): ViewModelProvider.Factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T = BrowserViewModel(
+                appContext = appContext,
                 networkMode = networkMode,
                 containerRepository = containerRepository,
                 tabRepository = tabRepository,
                 bookmarkRepository = bookmarkRepository,
                 sessionPool = sessionPool,
+                filePicker = filePicker,
+                fileDownloader = fileDownloader,
                 runtimeHolder = runtimeHolder,
                 torStatus = torStatus,
             ) as T

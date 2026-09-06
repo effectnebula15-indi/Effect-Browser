@@ -8,6 +8,8 @@ import io.effect.browser.data.repository.RoomBookmarkRepository
 import io.effect.browser.data.repository.RoomContainerRepository
 import io.effect.browser.data.repository.RoomTabRepository
 import io.effect.browser.domain.model.NetworkMode
+import io.effect.browser.files.FileDownloader
+import io.effect.browser.files.FilePickerCoordinator
 import io.effect.browser.gecko.GeckoRuntimeHolder
 import io.effect.browser.gecko.GeckoSessionPool
 import io.effect.browser.tor.TorController
@@ -46,6 +48,14 @@ object ServiceLocator {
     }
 
     val sessionPool: GeckoSessionPool by lazy { GeckoSessionPool(runtimeHolder) }
+
+    val filePicker: FilePickerCoordinator by lazy { FilePickerCoordinator() }
+
+    /**
+     * Application-scoped on purpose: a download must survive the tab that started it being
+     * closed, and viewModelScope would cancel it mid-copy.
+     */
+    val fileDownloader: FileDownloader by lazy { FileDownloader(appContext, scope) }
 
     val containerRepository: RoomContainerRepository by lazy {
         RoomContainerRepository(

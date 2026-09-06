@@ -2,6 +2,7 @@ package io.effect.browser.domain.url
 
 import io.effect.browser.domain.model.NetworkMode
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -23,6 +24,27 @@ class SearchEngineTest {
     fun `onion engine stays inside the tor network`() {
         val url = SearchEngine.DUCKDUCKGO_ONION.urlFor("test")
         assertTrue(url.contains(".onion/"))
+    }
+
+    @Test
+    fun `direct containers open on google by default`() {
+        assertEquals("https://www.google.com/", SearchEngine.homeUrlFor(NetworkMode.DIRECT))
+    }
+
+    @Test
+    fun `tor containers do not open on google`() {
+        // Same reason as the search default: google routinely blocks tor exit nodes, so a new
+        // tor tab would land on a CAPTCHA or an error page.
+        val home = SearchEngine.homeUrlFor(NetworkMode.TOR)
+        assertFalse(home.contains("google"))
+        assertEquals("https://duckduckgo.com/", home)
+    }
+
+    @Test
+    fun `every engine has a home page on the same host as its search`() {
+        SearchEngine.entries.forEach { engine ->
+            assertTrue(engine.name, engine.homeUrl.startsWith("https://"))
+        }
     }
 
     @Test
